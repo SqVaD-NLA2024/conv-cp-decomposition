@@ -7,7 +7,7 @@ from conv_cp.models import FGSMOutput
 def FGSM(
     model: nn.Module,
     images: torch.Tensor,
-    labels: Optional[torch.LongTensor],
+    labels: Optional[torch.LongTensor] = None,
     epsilon: float = 0.05,
     threshold: Optional[float] = None,
 ) -> FGSMOutput:
