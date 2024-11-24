@@ -1,3 +1,5 @@
+from typing import Optional, Literal
+
 from torch import nn
 import tensorly as tl
 
@@ -5,12 +7,16 @@ tl.set_backend("pytorch")
 
 
 class CPConv2d(nn.Module):
-    def __init__(self, layer: nn.Conv2d, rank: int):
+    def __init__(
+        self, layer: nn.Conv2d, rank: int, cp_init: Literal["svd", "random"] = "svd"
+    ):
         super().__init__()
         if layer.groups != 1:
             raise ValueError("Grouped convolutions are not supported")
 
-        _, (t, s, y, x) = tl.decomposition.parafac(layer.weight.data, rank=rank)
+        _, (t, s, y, x) = tl.decomposition.parafac(
+            layer.weight.data, rank=rank, init=cp_init
+        )
         in_c = s.shape[0]
         out_c = t.shape[0]
         k_y = y.shape[0]
@@ -54,3 +60,33 @@ class CPConv2d(nn.Module):
 
     def forward(self, x):
         return self.model.forward(x)
+
+
+def decompose_model(
+    model: nn.Module,
+    rank: Optional[int] = None,
+    coef: Optional[float] = None,
+    min_rank: int = 3,
+    max_rank: int = 20,
+    cp_init: Literal["svd", "random"] = "random",
+) -> nn.Module:
+    if rank is None and coef is None:
+        raise ValueError("Either rank or coef should be provided")
+    if rank is not None and coef is not None:
+        raise ValueError("Only one of rank or coef should be provided")
+
+    if rank is not None:
+        for i, layer in model.features.named_children():
+            if isinstance(layer, nn.Conv2d):
+                layer = CPConv2d(layer, rank, cp_init)
+                model.features._modules[i] = layer
+
+    if coef is not None:
+        for i, layer in model.features.named_children():
+            if isinstance(layer, nn.Conv2d):
+                rank_ = int(coef * layer.weight.numel() / sum(layer.weight.shape))
+                rank_ = min(max(rank_, min_rank), max_rank)
+                layer = CPConv2d(layer, rank_, cp_init)
+                model.features._modules[i] = layer
+
+    return model
