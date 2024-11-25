@@ -4,6 +4,7 @@ from copy import deepcopy
 import json
 import gc
 import logging
+from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 import torch
@@ -297,27 +298,37 @@ def process_model(
     return experiment_info
 
 
+def process_model_wrapper(model_conf, config):
+    logging.info(f"processing {model_conf['model'].__name__} with config {config}")
+    model, transform = get_model(model_conf["model"], model_conf["weights"])
+    model.eval()
+    try:
+        experiment_info = process_model(model, transform, config)
+        experiment_info["model"] = model_conf["model"].__name__
+        logging.info(f"experiment result: {experiment_info}")
+        return experiment_info
+    except Exception:
+        logging.exception(f"failed to process {model_conf['model'].__name__}")
+        return {
+            "model": model_conf["model"].__name__,
+            "error": True,
+            **config,
+        }
+
+
 def main():
     experiment_results = []
-    for model_conf in MODELS:
-        logging.info(f"processing {model_conf['model'].__name__}")
-        model, transform = get_model(model_conf["model"], model_conf["weights"])
-        model.eval()
 
-        for config in CONFIGS:
-            logging.info(f"processing config {config}")
-            try:
-                experiment_info = process_model(model, transform, config)
-                experiment_info["model"] = model_conf["model"].__name__
-                logging.info(f"experiment result: {experiment_info}")
-                experiment_results.append(experiment_info)
-            except Exception:
-                logging.exception(f"failed to process {model_conf['model'].__name__}")
-                experiment_info = {
-                    "model": model_conf["model"].__name__,
-                    "error": True,
-                    **config,
-                }
+    with ProcessPoolExecutor(max_workers=5) as executor:
+        futures = []
+        for model_conf in MODELS:
+            for config in CONFIGS:
+                futures.append(
+                    executor.submit(process_model_wrapper, model_conf, config)
+                )
+
+        for future in futures:
+            experiment_results.append(future.result())
 
     with open("result.json", "w") as f:
         json.dump(experiment_results, f)
