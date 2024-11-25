@@ -9,6 +9,7 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 import torch
 from torch import nn
+from torch.utils.data import DataLoader
 from torchvision.models import Weights
 from torchvision.models import (
     alexnet,
@@ -130,7 +131,7 @@ from torchvision.models import (
 from conv_cp.conv_cp import decompose_model
 from conv_cp.evaluation import evaluate_model
 from conv_cp.adversarial import FGSM
-from conv_cp.dataset import get_dataset_iterator
+from conv_cp.imagenet.dataset import ImageNet
 
 
 logging.basicConfig(
@@ -240,12 +241,11 @@ def get_model(
 
 
 def evaluate_adv_resistance(
-    model: nn.Module, transform: nn.Module, n_samples: int
+    model: nn.Module, transform: nn.Module, n_samples: int, dataset: ImageNet
 ) -> float:
     comb_model = CombModel(model, transform)
-    dataset_iter = get_dataset_iterator()
 
-    samples = [next(dataset_iter) for _ in range(n_samples)]
+    samples = [dataset[i] for i in range(n_samples)]
     images = [np.array(sample["image"]) for sample in samples]
     num_steps = []
     for image in images:
@@ -264,7 +264,10 @@ def evaluate_adv_resistance(
 
 
 def process_model(
-    model: nn.Module, transform: nn.Module, config: Dict[str, Any]
+    model: nn.Module,
+    transform: nn.Module,
+    config: Dict[str, Any],
+    dataset: ImageNet,
 ) -> Dict[str, Any]:
     decomp_model = deepcopy(model)
     if config["coef"] < 1:
@@ -273,6 +276,7 @@ def process_model(
     result = evaluate_model(
         decomp_model,
         transform,
+        dataset,
         device="cuda",
         batch_size=32,
         total_samples=50000,
@@ -287,7 +291,7 @@ def process_model(
         }
     )
     experiment_info["adv_resistance"] = evaluate_adv_resistance(
-        decomp_model, transform, 64
+        decomp_model, transform, 64, dataset
     )
 
     decomp_model.cpu()
@@ -298,12 +302,12 @@ def process_model(
     return experiment_info
 
 
-def process_model_wrapper(model_conf, config):
+def process_model_wrapper(model_conf, config, dataset):
     logging.info(f"processing {model_conf['model'].__name__} with config {config}")
     model, transform = get_model(model_conf["model"], model_conf["weights"])
     model.eval()
     try:
-        experiment_info = process_model(model, transform, config)
+        experiment_info = process_model(model, transform, config, dataset)
         experiment_info["model"] = model_conf["model"].__name__
         logging.info(f"experiment result: {experiment_info}")
         return experiment_info
@@ -318,13 +322,13 @@ def process_model_wrapper(model_conf, config):
 
 def main():
     experiment_results = []
-
+    dataset = ImageNet("data/val-images")
     with ProcessPoolExecutor(max_workers=5) as executor:
         futures = []
         for model_conf in MODELS:
             for config in CONFIGS:
                 futures.append(
-                    executor.submit(process_model_wrapper, model_conf, config)
+                    executor.submit(process_model_wrapper, model_conf, config, dataset)
                 )
 
         for future in futures:

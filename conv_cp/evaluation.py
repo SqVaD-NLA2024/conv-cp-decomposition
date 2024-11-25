@@ -3,8 +3,9 @@ from typing import Tuple, Union
 
 import torch
 from torch import nn
+from torch.utils.data import DataLoader
 
-from conv_cp.dataset import get_dataset
+from conv_cp.imagenet.dataset import ImageNet
 from conv_cp.models import EvaluationResult
 from conv_cp.utils import count_parameters
 
@@ -38,21 +39,19 @@ def preprocess_image(image, transform):
 def evaluate_model(
     model: nn.Module,
     transform: nn.Module,
+    dataset: ImageNet,
     device: Union[str, torch.DeviceObjType] = "cpu",
     batch_size: int = 32,
     total_samples: int = 50000,
 ) -> EvaluationResult:
-    dataset = get_dataset()
-    total_samples = min(total_samples, len(dataset))
-
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     model.to(device)
 
     total_elapsed_time = 0
     running_n_correct_preds = 0
     n_images = 0
 
-    for idx in range(0, total_samples, batch_size):
-        samples = dataset[idx : min(idx + batch_size, total_samples)]
+    for i, samples in enumerate(loader):
         images = [preprocess_image(sample["image"], transform) for sample in samples]
         labels = [sample["label"] for sample in samples]
 
@@ -64,6 +63,9 @@ def evaluate_model(
         total_elapsed_time += elapsed_time
         running_n_correct_preds += is_correct
         n_images += len(images)
+
+        if (i + 1) * batch_size >= total_samples:
+            break
 
     return EvaluationResult(
         accuracy_score=running_n_correct_preds / n_images,
