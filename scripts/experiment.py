@@ -1,9 +1,10 @@
 # region imports
-from typing import Callable, Tuple
+from typing import Callable, Tuple, Dict
 from copy import deepcopy
 import json
 import gc
 
+import numpy as np
 import torch
 from torch import nn
 from torchvision.models import Weights
@@ -126,6 +127,8 @@ from torchvision.models import (
 
 from conv_cp.conv_cp import decompose_model
 from conv_cp.evaluation import evaluate_model
+from conv_cp.adversarial import FGSM
+from conv_cp.dataset import get_dataset_iterator
 
 # endregion
 
@@ -191,6 +194,7 @@ MODELS = [
 ]
 
 CONFIGS = [
+    {"coef": 1},
     {"coef": 0.4, "min_rank": 3, "max_rank": 500},
     {"coef": 0.35, "min_rank": 3, "max_rank": 500},
     {"coef": 0.3, "min_rank": 3, "max_rank": 475},
@@ -210,6 +214,16 @@ CONFIGS = [
 
 
 # region code
+class CombModel(nn.Module):
+    def __init__(self, model: nn.Module, transform: nn.Module):
+        super().__init__()
+        self.model = model
+        self.transform = transform
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.model(self.transform(x))
+
+
 def get_model(
     model_name: Callable[[Weights], nn.Module], weights: Weights
 ) -> Tuple[nn.Module, nn.Module]:
@@ -217,6 +231,30 @@ def get_model(
     transform = weights.transforms()
 
     return model, transform
+
+
+def evaluate_adv_resistance(
+    model: nn.Module, transform: nn.Module, n_samples: int
+) -> float:
+    comb_model = CombModel(model, transform)
+    dataset_iter = get_dataset_iterator()
+
+    samples = [next(dataset_iter) for _ in range(n_samples)]
+    images = [np.array(sample["image"]) for sample in samples]
+    num_steps = []
+    for image in images:
+        image = torch.tensor(np.array(image)).permute(2, 0, 1).unsqueeze(0) / 255
+
+        result = FGSM(
+            comb_model,
+            image,
+            epsilon=0.001,
+            device="cuda",
+        )
+
+        num_steps.appennd(result.n_steps)
+
+    return np.mean(num_steps)
 
 
 def main():
@@ -228,7 +266,8 @@ def main():
 
         for config in CONFIGS:
             decomp_model = deepcopy(model)
-            decomp_model = decompose_model(decomp_model, **config)
+            if config["coef"] < 1:
+                decomp_model = decompose_model(decomp_model, **config)
 
             result = evaluate_model(
                 decomp_model,
@@ -237,11 +276,6 @@ def main():
                 batch_size=32,
                 total_samples=1000,
             )
-
-            decomp_model.cpu()
-            del decomp_model
-            torch.cuda.empty_cache()
-            gc.collect()
 
             experiment_info = deepcopy(config)
             experiment_info.update(
@@ -252,6 +286,14 @@ def main():
                     "model_name": model_conf["model"].__name__,
                 }
             )
+            experiment_info["adv_resistance"] = evaluate_adv_resistance(
+                decomp_model, transform, 32
+            )
+
+            decomp_model.cpu()
+            del decomp_model
+            torch.cuda.empty_cache()
+            gc.collect()
 
             print(experiment_info)
             experiment_results.append(experiment_info)

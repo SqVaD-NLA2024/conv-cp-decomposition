@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Union
 import torch
 from torch import nn
 from conv_cp.models import FGSMOutput
@@ -10,6 +10,7 @@ def FGSM(
     labels: Optional[torch.LongTensor] = None,
     epsilon: float = 0.05,
     threshold: Optional[float] = None,
+    device: Union[str | torch.DeviceObjType] = "cpu",
 ) -> FGSMOutput:
     """
     Perform the Fast Gradient Sign Method attack on the model using the given images and labels.
@@ -21,18 +22,21 @@ def FGSM(
         If None, function will stop when any other class is the most probable
         epsilon: The step size for the attack.
         threshold: The minimal probability for the target class. If None, will stop when the target class is the most probable.
+        device: device on which perform attack
 
     Returns:
         A FGSMOutput object containing the results of the attack.
     """
-    images = images.clone().detach().requires_grad_(True)
+    images = images.clone().detach().to(device).requires_grad_(True)
+
+    model.to(device)
 
     with torch.no_grad():
         correct_labels = model(images).argmax(dim=1)
 
     for step in range(100):
         images.grad = None
-        images.requires_grad = True
+        images.requires_grad_(True)
         logits = model(images)
         if labels is not None:
             loss = nn.CrossEntropyLoss()(logits, labels)
@@ -47,7 +51,7 @@ def FGSM(
             else:
                 images = images + epsilon * images.grad.sign()
             images = torch.clamp(images, 0, 1)
-            new_logits = model(images)
+            new_logits = model.forward(images)
 
         probs = torch.nn.functional.softmax(new_logits, dim=1)
         new_labels = new_logits.argmax(dim=1)
@@ -55,28 +59,28 @@ def FGSM(
             if threshold is not None and torch.all(probs[:, labels] >= threshold):
                 return FGSMOutput(
                     success=True,
-                    adversarial_images=images,
-                    adversarial_labels=new_labels,
+                    adversarial_images=images.cpu(),
+                    adversarial_labels=new_labels.cpu(),
                     n_steps=step + 1,
                 )
             elif threshold is None and torch.all(new_labels == labels):
                 return FGSMOutput(
                     success=True,
-                    adversarial_images=images,
-                    adversarial_labels=new_labels,
+                    adversarial_images=images.cpu(),
+                    adversarial_labels=new_labels.cpu(),
                     n_steps=step + 1,
                 )
         elif torch.all(new_labels != correct_labels):
             return FGSMOutput(
                 success=True,
-                adversarial_images=images,
-                adversarial_labels=new_labels,
+                adversarial_images=images.cpu(),
+                adversarial_labels=new_labels.cpu(),
                 n_steps=step + 1,
             )
 
     return FGSMOutput(
         success=False,
         adversarial_images=images,
-        adversarial_labels=new_labels,
+        adversarial_labels=new_labels.cpu(),
         n_steps=step + 1,
     )
