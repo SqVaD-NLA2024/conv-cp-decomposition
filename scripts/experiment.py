@@ -213,7 +213,7 @@ CONFIGS = [
 def get_model(
     model_name: Callable[[Weights], nn.Module], weights: Weights
 ) -> Tuple[nn.Module, nn.Module]:
-    model = model_name(parameters=weights)
+    model = model_name(weights=weights)
     transform = weights.transforms()
 
     return model, transform
