@@ -275,7 +275,7 @@ def process_model(
         transform,
         device="cuda",
         batch_size=32,
-        total_samples=1000,
+        total_samples=50000,
     )
 
     experiment_info = deepcopy(config)

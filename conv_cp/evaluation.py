@@ -4,7 +4,7 @@ from typing import Tuple, Union
 import torch
 from torch import nn
 
-from conv_cp.dataset import get_dataset_iterator
+from conv_cp.dataset import get_dataset
 from conv_cp.models import EvaluationResult
 from conv_cp.utils import count_parameters
 
@@ -42,7 +42,8 @@ def evaluate_model(
     batch_size: int = 32,
     total_samples: int = 50000,
 ) -> EvaluationResult:
-    dataset_iter = get_dataset_iterator()
+    dataset = get_dataset()
+    total_samples = min(total_samples, len(dataset))
 
     model.to(device)
 
@@ -50,23 +51,10 @@ def evaluate_model(
     running_n_correct_preds = 0
     n_images = 0
 
-    count = 0
-    reached_end = False
-    while True:
-        images = []
-        labels = []
-        for _ in range(batch_size):
-            try:
-                count += 1
-                sample = next(dataset_iter)
-                images.append(preprocess_image(sample["image"], transform))
-                labels.append(sample["label"])
-                if count >= total_samples:
-                    reached_end = True
-                    break
-            except StopIteration:
-                reached_end = True
-                break
+    for idx in range(0, total_samples, batch_size):
+        samples = dataset[idx : min(idx + batch_size, total_samples)]
+        images = [preprocess_image(sample["image"], transform) for sample in samples]
+        labels = [sample["label"] for sample in samples]
 
         images = torch.stack(images, dim=0)
         labels = torch.tensor(labels).to(dtype=torch.long)
@@ -76,9 +64,6 @@ def evaluate_model(
         total_elapsed_time += elapsed_time
         running_n_correct_preds += is_correct
         n_images += len(images)
-
-        if reached_end:
-            break
 
     return EvaluationResult(
         accuracy_score=running_n_correct_preds / n_images,
