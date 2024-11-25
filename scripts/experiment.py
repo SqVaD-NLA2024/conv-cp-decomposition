@@ -272,9 +272,7 @@ def process_model(
 
     if config["coef"] < 1:
         decomp_model.cuda()
-        print("START DECOMPOSITION")
         decomp_model = decompose_model(decomp_model, **config)
-        print("FINISH DECOMPOSITION")
 
     result = evaluate_model(
         decomp_model,
