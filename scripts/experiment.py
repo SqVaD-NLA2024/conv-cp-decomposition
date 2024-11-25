@@ -308,10 +308,18 @@ def main():
 
         for config in CONFIGS:
             logging.info(f"processing config {config}")
-            experiment_info = process_model(model, transform, config)
-            experiment_info["model"] = model_conf["model"].__name__
-            logging.info(f"experiment result: {experiment_info}")
-            experiment_results.append(experiment_info)
+            try:
+                experiment_info = process_model(model, transform, config)
+                experiment_info["model"] = model_conf["model"].__name__
+                logging.info(f"experiment result: {experiment_info}")
+                experiment_results.append(experiment_info)
+            except Exception:
+                logging.exception(f"failed to process {model_conf['model'].__name__}")
+                experiment_info = {
+                    "model": model_conf["model"].__name__,
+                    "error": True,
+                    **config,
+                }
 
     with open("result.json", "w") as f:
         json.dump(experiment_results, f)
