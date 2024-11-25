@@ -302,7 +302,8 @@ def process_model(
     return experiment_info
 
 
-def process_model_wrapper(model_conf, config, dataset):
+def process_model_wrapper(model_conf, config):
+    dataset = ImageNet("data/val-images")
     logging.info(f"processing {model_conf['model'].__name__} with config {config}")
     model, transform = get_model(model_conf["model"], model_conf["weights"])
     model.eval()
@@ -322,13 +323,12 @@ def process_model_wrapper(model_conf, config, dataset):
 
 def main():
     experiment_results = []
-    dataset = ImageNet("data/val-images")
     with ProcessPoolExecutor(max_workers=5) as executor:
         futures = []
         for model_conf in MODELS:
             for config in CONFIGS:
                 futures.append(
-                    executor.submit(process_model_wrapper, model_conf, config, dataset)
+                    executor.submit(process_model_wrapper, model_conf, config)
                 )
 
         for future in futures:
