@@ -253,7 +253,7 @@ def main():
                 }
             )
 
-            print(experiment_results)
+            print(experiment_info)
             experiment_results.append(experiment_info)
 
     with open("result.json", "w") as f:
