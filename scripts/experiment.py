@@ -9,7 +9,6 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
 from torchvision.models import Weights
 from torchvision.models import (
     alexnet,
