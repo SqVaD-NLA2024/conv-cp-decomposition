@@ -1,5 +1,5 @@
 # region imports
-from typing import Callable, Tuple
+from typing import Callable, Tuple, Any, Dict
 from copy import deepcopy
 import json
 import gc
@@ -257,6 +257,41 @@ def evaluate_adv_resistance(
     return np.mean(num_steps).item()
 
 
+def process_model(
+    model: nn.Module, transform: nn.Module, config: Dict[str, Any]
+) -> Dict[str, Any]:
+    decomp_model = deepcopy(model)
+    if config["coef"] < 1:
+        decomp_model = decompose_model(decomp_model, **config)
+
+    result = evaluate_model(
+        decomp_model,
+        transform,
+        device="cuda",
+        batch_size=32,
+        total_samples=1000,
+    )
+
+    experiment_info = deepcopy(config)
+    experiment_info.update(
+        {
+            "accuracy_score": result.accuracy_score,
+            "n_params": result.n_params,
+            "inference_time": result.inference_time,
+        }
+    )
+    experiment_info["adv_resistance"] = evaluate_adv_resistance(
+        decomp_model, transform, 64
+    )
+
+    decomp_model.cpu()
+    del decomp_model
+    torch.cuda.empty_cache()
+    gc.collect()
+
+    return experiment_info
+
+
 def main():
     experiment_results = []
     for model_conf in MODELS:
@@ -265,37 +300,9 @@ def main():
         model.eval()
 
         for config in CONFIGS:
-            decomp_model = deepcopy(model)
-            if config["coef"] < 1:
-                decomp_model = decompose_model(decomp_model, **config)
-
-            result = evaluate_model(
-                decomp_model,
-                transform,
-                device="cuda",
-                batch_size=32,
-                total_samples=1000,
-            )
-
-            experiment_info = deepcopy(config)
-            experiment_info.update(
-                {
-                    "accuracy_score": result.accuracy_score,
-                    "n_params": result.n_params,
-                    "inference_time": result.inference_time,
-                    "model_name": model_conf["model"].__name__,
-                }
-            )
-            experiment_info["adv_resistance"] = evaluate_adv_resistance(
-                decomp_model, transform, 64
-            )
-
-            decomp_model.cpu()
-            del decomp_model
-            torch.cuda.empty_cache()
-            gc.collect()
-
-            print(experiment_info)
+            print(f"processing config {config}")
+            experiment_info = process_model(model, transform, config)
+            experiment_info["model"] = model_conf["model"].__name__
             experiment_results.append(experiment_info)
 
     with open("result.json", "w") as f:

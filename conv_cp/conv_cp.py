@@ -56,10 +56,36 @@ class CPConv2d(nn.Module):
         self.model[1].weight.data = y.T[:, None, :, None]
         self.model[2].weight.data = x.T[:, None, None, :]
         self.model[3].weight.data = t[:, :, None, None]
-        self.model[3].bias.data = layer.bias
+        if layer.bias is not None:
+            self.model[3].bias.data = layer.bias
 
     def forward(self, x):
         return self.model.forward(x)
+
+
+def replace_conv2d(
+    module: nn.Module,
+    rank: Optional[int],
+    coef: Optional[float],
+    min_rank: Optional[int],
+    max_rank: Optional[int],
+    cp_init: Literal["svd", "random"],
+) -> nn.Module:
+    for name, child in module.named_children():
+        if isinstance(child, nn.Conv2d):
+            if rank is not None:
+                new_layer = CPConv2d(child, rank, cp_init)
+            else:
+                rank_ = int(coef * child.weight.numel() / sum(child.weight.shape))
+                if min_rank is not None:
+                    rank_ = max(min_rank, rank_)
+                if max_rank is not None:
+                    rank_ = min(max_rank, rank_)
+                new_layer = CPConv2d(child, rank_, cp_init)
+            module.add_module(name, new_layer)
+        else:
+            replace_conv2d(child, rank, coef, min_rank, max_rank, cp_init)
+    return module
 
 
 def decompose_model(
@@ -75,23 +101,5 @@ def decompose_model(
     if rank is not None and coef is not None:
         raise ValueError("Only one of rank or coef should be provided")
 
-    if rank is not None:
-        for i, layer in model.features.named_children():
-            if isinstance(layer, nn.Conv2d):
-                layer = CPConv2d(layer, rank, cp_init)
-                model.features._modules[i] = layer
-
-    if coef is not None:
-        for i, layer in model.features.named_children():
-            if isinstance(layer, nn.Conv2d):
-                rank_ = int(coef * layer.weight.numel() / sum(layer.weight.shape))
-
-                if min_rank is not None:
-                    rank_ = max(min_rank, rank_)
-                if max_rank is not None:
-                    rank_ = min(max_rank, rank_)
-
-                layer = CPConv2d(layer, rank_, cp_init)
-                model.features._modules[i] = layer
-
+    model = replace_conv2d(model, rank, coef, min_rank, max_rank, cp_init)
     return model
