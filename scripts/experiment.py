@@ -252,7 +252,7 @@ def evaluate_adv_resistance(
             device="cuda",
         )
 
-        num_steps.appennd(result.n_steps)
+        num_steps.append(result.n_steps)
 
     return np.mean(num_steps)
 
