@@ -244,11 +244,11 @@ def evaluate_adv_resistance(
 ) -> float:
     comb_model = CombModel(model, transform)
 
-    samples = [dataset[i] for i in range(n_samples)]
-    images = [np.array(sample["image"]) for sample in samples]
+    images = [np.array(dataset.get_raw_img(i)) for i in range(n_samples)]
+
     num_steps = []
     for image in images:
-        image = torch.tensor(np.array(image)).permute(2, 0, 1).unsqueeze(0) / 255
+        image = torch.tensor(image).permute(2, 0, 1).unsqueeze(0) / 255
 
         result = FGSM(
             comb_model,
@@ -269,16 +269,19 @@ def process_model(
     dataset: ImageNet,
 ) -> Dict[str, Any]:
     decomp_model = deepcopy(model)
+
     if config["coef"] < 1:
+        decomp_model.cuda()
+        print("START DECOMPOSITION")
         decomp_model = decompose_model(decomp_model, **config)
+        print("FINISH DECOMPOSITION")
 
     result = evaluate_model(
         decomp_model,
-        transform,
         dataset,
         device="cuda",
-        batch_size=32,
-        total_samples=50000,
+        batch_size=64,
+        total_samples=10000,
     )
 
     experiment_info = deepcopy(config)
@@ -302,15 +305,18 @@ def process_model(
 
 
 def process_model_wrapper(model_conf, config):
-    dataset = ImageNet("data/val-images")
     logging.info(f"processing {model_conf['model'].__name__} with config {config}")
     model, transform = get_model(model_conf["model"], model_conf["weights"])
     model.eval()
+
+    dataset = ImageNet("data/val-images", transform)
+
     try:
         experiment_info = process_model(model, transform, config, dataset)
         experiment_info["model"] = model_conf["model"].__name__
         logging.info(f"experiment result: {experiment_info}")
         return experiment_info
+
     except Exception:
         logging.exception(f"failed to process {model_conf['model'].__name__}")
         return {
@@ -322,7 +328,7 @@ def process_model_wrapper(model_conf, config):
 
 def main():
     experiment_results = []
-    with ProcessPoolExecutor(max_workers=5) as executor:
+    with ProcessPoolExecutor(max_workers=4) as executor:
         futures = []
         for model_conf in MODELS:
             for config in CONFIGS:

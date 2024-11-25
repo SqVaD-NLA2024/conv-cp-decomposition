@@ -38,7 +38,6 @@ def preprocess_image(image, transform):
 @torch.no_grad()
 def evaluate_model(
     model: nn.Module,
-    transform: nn.Module,
     dataset: ImageNet,
     device: Union[str, torch.DeviceObjType] = "cpu",
     batch_size: int = 32,
@@ -51,13 +50,7 @@ def evaluate_model(
     running_n_correct_preds = 0
     n_images = 0
 
-    for i, samples in enumerate(loader):
-        images = [preprocess_image(sample["image"], transform) for sample in samples]
-        labels = [sample["label"] for sample in samples]
-
-        images = torch.stack(images, dim=0)
-        labels = torch.tensor(labels).to(dtype=torch.long)
-
+    for i, (images, labels) in enumerate(loader):
         _, elapsed_time, is_correct = process_images(model, images, labels, device)
 
         total_elapsed_time += elapsed_time
