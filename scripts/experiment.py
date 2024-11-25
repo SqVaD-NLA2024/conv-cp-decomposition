@@ -213,7 +213,7 @@ CONFIGS = [
 def get_model(
     model_name: Callable[[Weights], nn.Module], weights: Weights
 ) -> Tuple[nn.Module, nn.Module]:
-    model = model_name(weights)
+    model = model_name(parameters=weights)
     transform = weights.transforms()
 
     return model, transform
@@ -238,8 +238,8 @@ def main():
                 total_samples=1000,
             )
 
-            model.cpu()
-            del model
+            decomp_model.cpu()
+            del decomp_model
             torch.cuda.empty_cache()
             gc.collect()
 
