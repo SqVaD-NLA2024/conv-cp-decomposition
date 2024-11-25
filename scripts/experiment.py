@@ -1,5 +1,5 @@
 # region imports
-from typing import Callable, Tuple, Dict
+from typing import Callable, Tuple
 from copy import deepcopy
 import json
 import gc
@@ -248,13 +248,13 @@ def evaluate_adv_resistance(
         result = FGSM(
             comb_model,
             image,
-            epsilon=0.001,
+            epsilon=0.0005,
             device="cuda",
         )
 
         num_steps.append(result.n_steps)
 
-    return np.mean(num_steps)
+    return np.mean(num_steps).item()
 
 
 def main():
@@ -287,7 +287,7 @@ def main():
                 }
             )
             experiment_info["adv_resistance"] = evaluate_adv_resistance(
-                decomp_model, transform, 32
+                decomp_model, transform, 64
             )
 
             decomp_model.cpu()
