@@ -202,20 +202,16 @@ MODELS = [
 
 CONFIGS = [
     {"coef": 1},
+    {"coef": 0.7, "min_rank": 3, "max_rank": 700},
+    {"coef": 0.6, "min_rank": 3, "max_rank": 650},
+    {"coef": 0.5, "min_rank": 3, "max_rank": 600},
+    {"coef": 0.45, "min_rank": 3, "max_rank": 550},
     {"coef": 0.4, "min_rank": 3, "max_rank": 500},
     {"coef": 0.35, "min_rank": 3, "max_rank": 500},
     {"coef": 0.3, "min_rank": 3, "max_rank": 475},
     {"coef": 0.25, "min_rank": 3, "max_rank": 450},
     {"coef": 0.2, "min_rank": 3, "max_rank": 425},
-    {"coef": 0.15, "min_rank": 3, "max_rank": 375},
-    {"coef": 0.1, "min_rank": 3, "max_rank": 325},
-    {"coef": 0.05, "min_rank": 3, "max_rank": 275},
-    {"coef": 0.04, "min_rank": 3, "max_rank": 250},
-    {"coef": 0.03, "min_rank": 3, "max_rank": 225},
-    {"coef": 0.02, "min_rank": 3, "max_rank": 200},
-    {"coef": 0.01, "min_rank": 3, "max_rank": 150},
-    {"coef": 0.005, "min_rank": 3, "max_rank": 100},
-    {"coef": 0.001, "min_rank": 3, "max_rank": 100},
+    {"coef": 0.15, "min_rank": 3, "max_rank": 375}
 ]
 # endregion
 
