@@ -3,6 +3,7 @@ from typing import Callable, Tuple, Any, Dict
 from copy import deepcopy
 import json
 import gc
+import logging
 
 import numpy as np
 import torch
@@ -129,6 +130,12 @@ from conv_cp.conv_cp import decompose_model
 from conv_cp.evaluation import evaluate_model
 from conv_cp.adversarial import FGSM
 from conv_cp.dataset import get_dataset_iterator
+
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
 
 # endregion
 
@@ -295,12 +302,12 @@ def process_model(
 def main():
     experiment_results = []
     for model_conf in MODELS:
-        print(f"processing {model_conf['model'].__name__}")
+        logging.info(f"processing {model_conf['model'].__name__}")
         model, transform = get_model(model_conf["model"], model_conf["weights"])
         model.eval()
 
         for config in CONFIGS:
-            print(f"processing config {config}")
+            logging.info(f"processing config {config}")
             experiment_info = process_model(model, transform, config)
             experiment_info["model"] = model_conf["model"].__name__
             experiment_results.append(experiment_info)
