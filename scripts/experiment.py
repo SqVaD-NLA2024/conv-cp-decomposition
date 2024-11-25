@@ -310,6 +310,7 @@ def main():
             logging.info(f"processing config {config}")
             experiment_info = process_model(model, transform, config)
             experiment_info["model"] = model_conf["model"].__name__
+            logging.info(f"experiment result: {experiment_info}")
             experiment_results.append(experiment_info)
 
     with open("result.json", "w") as f:
