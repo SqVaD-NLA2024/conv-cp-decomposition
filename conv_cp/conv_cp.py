@@ -66,8 +66,8 @@ def decompose_model(
     model: nn.Module,
     rank: Optional[int] = None,
     coef: Optional[float] = None,
-    min_rank: int = 3,
-    max_rank: int = 20,
+    min_rank: Optional[int] = None,
+    max_rank: Optional[int] = None,
     cp_init: Literal["svd", "random"] = "random",
 ) -> nn.Module:
     if rank is None and coef is None:
@@ -85,7 +85,12 @@ def decompose_model(
         for i, layer in model.features.named_children():
             if isinstance(layer, nn.Conv2d):
                 rank_ = int(coef * layer.weight.numel() / sum(layer.weight.shape))
-                rank_ = min(max(rank_, min_rank), max_rank)
+
+                if min_rank is not None:
+                    rank_ = max(min_rank, rank_)
+                if max_rank is not None:
+                    rank_ = min(max_rank, rank_)
+
                 layer = CPConv2d(layer, rank_, cp_init)
                 model.features._modules[i] = layer
 
