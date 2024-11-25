@@ -202,6 +202,8 @@ MODELS = [
 
 CONFIGS = [
     {"coef": 1},
+    {"coef": 0.9, "min_rank": 3, "max_rank": 800},
+    {"coef": 0.8, "min_rank": 3, "max_rank": 750},
     {"coef": 0.7, "min_rank": 3, "max_rank": 700},
     {"coef": 0.6, "min_rank": 3, "max_rank": 650},
     {"coef": 0.5, "min_rank": 3, "max_rank": 600},
@@ -211,7 +213,7 @@ CONFIGS = [
     {"coef": 0.3, "min_rank": 3, "max_rank": 475},
     {"coef": 0.25, "min_rank": 3, "max_rank": 450},
     {"coef": 0.2, "min_rank": 3, "max_rank": 425},
-    {"coef": 0.15, "min_rank": 3, "max_rank": 375}
+    {"coef": 0.15, "min_rank": 3, "max_rank": 375},
 ]
 # endregion
 
