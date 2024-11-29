@@ -50,7 +50,7 @@ class CPConv2d(nn.Module):
                 stride=(1, stride_x),
                 dilation=(1, dilation_x),
             ),
-            nn.Conv2d(rank, out_c, 1, bias=True),
+            nn.Conv2d(rank, out_c, 1, bias=layer.bias is not None),
         )
         self.model[0].weight.data = s.T[:, :, None, None]
         self.model[1].weight.data = y.T[:, None, :, None]
