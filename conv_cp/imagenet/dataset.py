@@ -30,6 +30,17 @@ class ImageNet(Dataset):
         _, label_id = root.rsplit("_", maxsplit=1)
         return self.label_map[label_id]
 
+    def split(self, ratio: float):
+        train_size = int(len(self) * ratio)
+
+        train_dataset = ImageNet(self.root_dir, self.transform)
+        train_dataset.files = self.files[:train_size]
+
+        test_dataset = ImageNet(self.root_dir, self.transform)
+        test_dataset.files = self.files[train_size:]
+
+        return train_dataset, test_dataset
+
     def get_raw_img(self, idx: int) -> Image.Image:
         image = Image.open(os.path.join(self.root_dir, self.files[idx]))
         if image.mode != "RGB":
