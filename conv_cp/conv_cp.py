@@ -8,19 +8,17 @@ tl.set_backend("pytorch")
 
 class CPConv2d(nn.Module):
     def __init__(
-        self, layer: nn.Conv2d, rank: int, cp_init: Literal["svd", "random"] = "svd"
+        self,
+        layer: nn.Conv2d,
+        rank: int,
+        do_cp: bool = True,
+        cp_init: Literal["svd", "random"] = "svd",
     ):
         super().__init__()
         if layer.groups != 1:
             raise ValueError("Grouped convolutions are not supported")
 
-        _, (t, s, y, x) = tl.decomposition.parafac(
-            layer.weight.data, rank=rank, init=cp_init
-        )
-        in_c = s.shape[0]
-        out_c = t.shape[0]
-        k_y = y.shape[0]
-        k_x = x.shape[0]
+        out_c, in_c, k_y, k_x = layer.weight.shape
         pad_y = layer.padding[0]
         pad_x = layer.padding[1]
         stride_y = layer.stride[0]
@@ -52,12 +50,17 @@ class CPConv2d(nn.Module):
             ),
             nn.Conv2d(rank, out_c, 1, bias=layer.bias is not None),
         )
-        self.model[0].weight.data = s.T[:, :, None, None]
-        self.model[1].weight.data = y.T[:, None, :, None]
-        self.model[2].weight.data = x.T[:, None, None, :]
-        self.model[3].weight.data = t[:, :, None, None]
-        if layer.bias is not None:
-            self.model[3].bias.data = layer.bias
+
+        if do_cp:
+            _, (t, s, y, x) = tl.decomposition.parafac(
+                layer.weight.data, rank=rank, init=cp_init
+            )
+            self.model[0].weight.data = s.T[:, :, None, None]
+            self.model[1].weight.data = y.T[:, None, :, None]
+            self.model[2].weight.data = x.T[:, None, None, :]
+            self.model[3].weight.data = t[:, :, None, None]
+            if layer.bias is not None:
+                self.model[3].bias.data = layer.bias
 
     def forward(self, x):
         return self.model.forward(x)
@@ -69,22 +72,25 @@ def replace_conv2d(
     coef: Optional[float],
     min_rank: Optional[int],
     max_rank: Optional[int],
+    do_cp: bool,
     cp_init: Literal["svd", "random"],
 ) -> nn.Module:
     for name, child in module.named_children():
+        if isinstance(child, CPConv2d):
+            continue
         if isinstance(child, nn.Conv2d):
             if rank is not None:
-                new_layer = CPConv2d(child, rank, cp_init)
+                new_layer = CPConv2d(child, rank, do_cp, cp_init)
             else:
                 rank_ = int(coef * child.weight.numel() / sum(child.weight.shape))
                 if min_rank is not None:
                     rank_ = max(min_rank, rank_)
                 if max_rank is not None:
                     rank_ = min(max_rank, rank_)
-                new_layer = CPConv2d(child, rank_, cp_init)
+                new_layer = CPConv2d(child, rank_, do_cp, cp_init)
             module.add_module(name, new_layer)
         else:
-            replace_conv2d(child, rank, coef, min_rank, max_rank, cp_init)
+            replace_conv2d(child, rank, coef, min_rank, max_rank, do_cp, cp_init)
     return module
 
 
@@ -94,6 +100,7 @@ def decompose_model(
     coef: Optional[float] = None,
     min_rank: Optional[int] = None,
     max_rank: Optional[int] = None,
+    do_cp: bool = True,
     cp_init: Literal["svd", "random"] = "random",
 ) -> nn.Module:
     if rank is None and coef is None:
@@ -101,5 +108,5 @@ def decompose_model(
     if rank is not None and coef is not None:
         raise ValueError("Only one of rank or coef should be provided")
 
-    model = replace_conv2d(model, rank, coef, min_rank, max_rank, cp_init)
+    model = replace_conv2d(model, rank, coef, min_rank, max_rank, do_cp, cp_init)
     return model
