@@ -1,4 +1,4 @@
-from typing import Literal, Generator, Tuple, Callable
+from typing import Literal, Generator, Tuple, Callable, Optional, Dict
 from copy import deepcopy
 
 import torch
@@ -79,7 +79,6 @@ class CPConv2d(nn.Module):
         stride_x = layer.stride[1]
         dilation_y = layer.dilation[0]
         dilation_x = layer.dilation[1]
-
         self.model = nn.Sequential(
             nn.Conv2d(in_c, rank, 1, bias=False),
             nn.Conv2d(
@@ -120,7 +119,126 @@ class CPConv2d(nn.Module):
         return self.model.forward(x)
 
 
-def get_conv_layers(
+def decompose_model(
+    model: nn.Module,
+    conv_rank: int,
+    fc_rank: int,
+    loss_fn: Callable[[nn.Module], float],
+    train_fn: Callable[[nn.Module], None],
+    trial_rank: int = 5,
+    layer_size_regularization: float = 0.0,
+    linear_decomp_type: Literal["cp", "svd"] = "cp",
+    freeze_decomposed: bool = False,
+    verbose: bool = False,
+    predefined_ranks: Optional[Dict[str, int]] = None,
+) -> nn.Module:
+    def debug(*args, **kwargs):
+        if verbose:
+            print(*args, **kwargs)
+
+    if predefined_ranks is None:
+        predefined_ranks = {}
+
+    conv_layers = list(_get_conv_layers(model))
+    fc_layers = list(_get_fc_layers(model))
+
+    conv_losses = {}
+    conv_ranks = {}
+    conv_sizes = {}
+    total_conv_rank = conv_rank
+    debug("Computing losses for conv layers")
+    for name, conv_layer in conv_layers:
+        if name in predefined_ranks:
+            debug(f"Using predefined rank {predefined_ranks[name]} for {name}")
+            total_conv_rank -= predefined_ranks[name]
+            conv_ranks[name] = predefined_ranks[name]
+            continue
+        debug(f"Processing module {name}")
+        cp_conv_layer = CPConv2d(conv_layer, rank=trial_rank)
+        cp_model = deepcopy(model)
+        cp_model.set_submodule(name, cp_conv_layer)
+        conv_losses[name] = loss_fn(cp_model)
+        conv_sizes[name] = _get_n_params(cp_conv_layer)
+
+    total_conv_loss = sum(conv_losses.values())
+    total_conv_size = sum(conv_sizes.values())
+    for name, loss in conv_losses.items():
+        loss_prop = loss / total_conv_loss
+        size_prop = conv_sizes[name] / total_conv_size
+        rank_prop = (
+            1 - layer_size_regularization
+        ) * loss_prop + layer_size_regularization * size_prop
+
+        rank = int(rank_prop * total_conv_rank)
+        conv_ranks[name] = rank
+
+    conv_names = list(conv_ranks.keys())
+    for i in range(total_conv_rank - sum(conv_ranks.values())):
+        key = conv_names[i % len(conv_layers)]
+        conv_ranks[key] += 1
+
+    fc_losses = {}
+    fc_ranks = {}
+    fc_sizes = {}
+    total_fc_rank = fc_rank
+    debug("Computing losses for fc layers")
+    for name, fc_layer in fc_layers:
+        if name in predefined_ranks:
+            debug(f"Using predefined rank {predefined_ranks[name]} for {name}")
+            total_fc_rank -= predefined_ranks[name]
+            fc_ranks[name] = predefined_ranks[name]
+            continue
+        debug(f"Processing module {name}")
+        cp_fc_layer = CPLinear(fc_layer, rank=trial_rank)
+        cp_model = deepcopy(model)
+        cp_model.set_submodule(name, cp_fc_layer)
+        fc_losses[name] = loss_fn(cp_model)
+        fc_sizes[name] = _get_n_params(cp_fc_layer)
+
+    total_fc_loss = sum(fc_losses.values())
+    total_fc_size = sum(fc_sizes.values())
+    for name, loss in fc_losses.items():
+        loss_prop = loss / total_fc_loss
+        size_prop = fc_sizes[name] / total_fc_size
+        rank_prop = (
+            1 - layer_size_regularization
+        ) * loss_prop + layer_size_regularization * size_prop
+
+        rank = int(rank_prop * total_fc_rank)
+        fc_ranks[name] = rank
+
+    fc_names = list(fc_ranks.keys())
+    for i in range(total_fc_rank - sum(fc_ranks.values())):
+        key = fc_names[i % len(fc_layers)]
+        fc_ranks[key] += 1
+
+    debug("Initializing CP model")
+    for name, rank in conv_ranks.items():
+        debug(f"Decomposing {name} with rank {rank}")
+        conv_layer = model.get_submodule(name)
+        cp_conv_layer = CPConv2d(conv_layer, rank=rank)
+        if freeze_decomposed:
+            _freeze(cp_conv_layer)
+        model.set_submodule(name, cp_conv_layer)
+        debug(f"Training model with {name} decomposed")
+        train_fn(model)
+
+    for i, (name, rank) in enumerate(fc_ranks.items()):
+        debug(f"Decomposing {name} with rank {rank}")
+        fc_layer = model.get_submodule(name)
+        cp_fc_layer = _get_linear_decomp(fc_layer, rank, linear_decomp_type)
+        if freeze_decomposed:
+            _freeze(cp_fc_layer)
+        model.set_submodule(name, cp_fc_layer)
+        if i < len(fc_layers) - 1:
+            if not freeze_decomposed:
+                debug(f"Training model with {name} decomposed")
+                train_fn(model)
+
+    return model
+
+
+def _get_conv_layers(
     model: nn.Module, prefix: str = ""
 ) -> Generator[Tuple[str, nn.Module], None, None]:
     for name, child in model.named_children():
@@ -130,10 +248,10 @@ def get_conv_layers(
         if isinstance(child, nn.Conv2d):
             yield full_name, child
         else:
-            yield from get_conv_layers(child, prefix=full_name)
+            yield from _get_conv_layers(child, prefix=full_name)
 
 
-def get_fc_layers(
+def _get_fc_layers(
     model: nn.Module, prefix: str = ""
 ) -> Generator[Tuple[str, nn.Module], None, None]:
     for name, child in model.named_children():
@@ -143,10 +261,10 @@ def get_fc_layers(
         if isinstance(child, nn.Linear):
             yield full_name, child
         else:
-            yield from get_fc_layers(child, prefix=full_name)
+            yield from _get_fc_layers(child, prefix=full_name)
 
 
-def get_linear_decomp(layer: nn.Linear, rank: int, decomp_type: Literal["cp", "svd"]):
+def _get_linear_decomp(layer: nn.Linear, rank: int, decomp_type: Literal["cp", "svd"]):
     if decomp_type == "cp":
         return CPLinear(layer, rank=rank)
     elif decomp_type == "svd":
@@ -155,76 +273,10 @@ def get_linear_decomp(layer: nn.Linear, rank: int, decomp_type: Literal["cp", "s
         raise ValueError(f"Unknown decomposition type: {decomp_type}")
 
 
-def freeze(model: nn.Module):
+def _freeze(model: nn.Module):
     for param in model.parameters():
         param.requires_grad = False
 
 
-def decompose_model(
-    model: nn.Module,
-    conv_rank: int,
-    fc_rank: int,
-    loss_fn: Callable[[nn.Module], float],
-    train_fn: Callable[[nn.Module], None],
-    trial_rank: int = 5,
-    linear_decomp_type: Literal["cp", "svd"] = "cp",
-    freeze_decomposed: bool = False,
-    verbose: bool = False,
-) -> nn.Module:
-    def debug(*args, **kwargs):
-        if verbose:
-            print(*args, **kwargs)
-
-    conv_layers = list(get_conv_layers(model))
-    fc_layers = list(get_fc_layers(model))
-
-    conv_losses = []
-    debug("Computing losses for conv layers")
-    for name, conv_layer in conv_layers:
-        debug(f"Processing module {name}")
-        cp_conv_layer = CPConv2d(conv_layer, rank=trial_rank)
-        cp_model = deepcopy(model)
-        cp_model.set_submodule(name, cp_conv_layer)
-        conv_losses.append(loss_fn(cp_model))
-
-    total_conv_loss = sum(conv_losses)
-    conv_ranks = [int(conv_rank * (loss / total_conv_loss)) for loss in conv_losses]
-    for i in range(conv_rank - sum(conv_ranks)):
-        conv_ranks[i % len(conv_layers)] += 1
-
-    fc_losses = []
-    debug("Computing losses for fc layers")
-    for name, fc_layer in fc_layers:
-        debug(f"Processing module {name}")
-        cp_fc_layer = CPLinear(fc_layer, rank=trial_rank)
-        cp_model = deepcopy(model)
-        cp_model.set_submodule(name, cp_fc_layer)
-        fc_losses.append(loss_fn(cp_model))
-
-    total_fc_loss = sum(fc_losses)
-    fc_ranks = [int(fc_rank * (loss / total_fc_loss)) for loss in fc_losses]
-    for i in range(fc_rank - sum(fc_ranks)):
-        fc_ranks[i % len(fc_layers)] += 1
-
-    debug("Initializing CP model")
-    for (name, conv_layer), rank in zip(conv_layers, conv_ranks):
-        debug(f"Decomposing {name} with rank {rank}")
-        cp_conv_layer = CPConv2d(conv_layer, rank=rank)
-        if freeze_decomposed:
-            freeze(cp_conv_layer)
-        model.set_submodule(name, cp_conv_layer)
-        debug(f"Training model with {name} decomposed")
-        train_fn(model)
-
-    for i, ((name, fc_layer), rank) in enumerate(zip(fc_layers, fc_ranks)):
-        debug(f"Decomposing {name} with rank {rank}")
-        cp_fc_layer = get_linear_decomp(fc_layer, rank, linear_decomp_type)
-        if freeze_decomposed:
-            freeze(cp_fc_layer)
-        model.set_submodule(name, cp_fc_layer)
-        if i < len(fc_layers) - 1:
-            if not freeze_decomposed:
-                debug(f"Training model with {name} decomposed")
-                train_fn(model)
-
-    return model
+def _get_n_params(model: nn.Module) -> int:
+    return sum(p.numel() for p in model.parameters())
